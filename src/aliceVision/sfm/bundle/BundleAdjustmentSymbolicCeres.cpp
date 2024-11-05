@@ -24,6 +24,7 @@
 #include <aliceVision/sfm/bundle/costfunctions/panoramaPinhole.hpp>
 #include <aliceVision/sfm/bundle/costfunctions/rotationPrior.hpp>
 
+#include <ceres/rotation.h>
 #include <filesystem>
 #include <fstream>
 
@@ -34,47 +35,6 @@ namespace sfm {
 
 using namespace aliceVision::camera;
 using namespace aliceVision::geometry;
-
-void BundleAdjustmentSymbolicCeres::addPose(const sfmData::CameraPose& cameraPose,
-                                            bool isConstant,
-                                            SE3::Matrix& poseBlock,
-                                            ceres::Problem& problem,
-                                            bool refineTranslation,
-                                            bool refineRotation)
-{
-    const Mat3& R = cameraPose.getTransform().rotation();
-    const Vec3& t = cameraPose.getTransform().translation();
-
-    poseBlock = SE3::Matrix::Identity();
-    poseBlock.block<3, 3>(0, 0) = R;
-    poseBlock.block<3, 1>(0, 3) = t;
-    double* poseBlockPtr = poseBlock.data();
-    problem.AddParameterBlock(poseBlockPtr, 16);
-
-    // add pose parameter to the all parameters blocks pointers list
-    _allParametersBlocks.push_back(poseBlockPtr);
-
-    // keep the camera extrinsics constants
-    if (cameraPose.isLocked() || isConstant || (!refineTranslation && !refineRotation))
-    {
-        // set the whole parameter block as constant.
-        _statistics.addState(EParameter::POSE, EEstimatorParameterState::CONSTANT);
-
-        problem.SetParameterBlockConstant(poseBlockPtr);
-        return;
-    }
-
-    if (refineRotation || refineTranslation)
-    {
-        problem.SetManifold(poseBlockPtr, new SE3ManifoldLeft(refineRotation, refineTranslation));
-    }
-    else
-    {
-        ALICEVISION_THROW_ERROR("BundleAdjustmentSymbolicCeres: Constant extrinsics not supported at this time");
-    }
-
-    _statistics.addState(EParameter::POSE, EEstimatorParameterState::REFINED);
-}
 
 void BundleAdjustmentSymbolicCeres::CeresOptions::setDenseBA()
 {
@@ -258,11 +218,68 @@ void BundleAdjustmentSymbolicCeres::setSolverOptions(ceres::Solver::Options& sol
 }
 
 void BundleAdjustmentSymbolicCeres::addExtrinsicsToProblem(const sfmData::SfMData& sfmData,
-                                                           BundleAdjustment::ERefineOptions refineOptions,
-                                                           ceres::Problem& problem)
+                                                   BundleAdjustment::ERefineOptions refineOptions,
+                                                   ceres::Problem& problem)
 {
     const bool refineTranslation = refineOptions & BundleAdjustment::REFINE_TRANSLATION;
     const bool refineRotation = refineOptions & BundleAdjustment::REFINE_ROTATION;
+
+    const auto addPose = [&](const sfmData::CameraPose& cameraPose, bool isConstant, std::array<double, 6>& poseBlock) {
+        const Mat3& R = cameraPose.getTransform().rotation();
+        const Vec3& t = cameraPose.getTransform().translation();
+
+        double angleAxis[3];
+        ceres::RotationMatrixToAngleAxis(static_cast<const double*>(R.data()), angleAxis);
+        poseBlock.at(0) = angleAxis[0];
+        poseBlock.at(1) = angleAxis[1];
+        poseBlock.at(2) = angleAxis[2];
+        poseBlock.at(3) = t(0);
+        poseBlock.at(4) = t(1);
+        poseBlock.at(5) = t(2);
+
+        double* poseBlockPtr = poseBlock.data();
+        problem.AddParameterBlock(poseBlockPtr, 6);
+
+        // add pose parameter to the all parameters blocks pointers list
+        _allParametersBlocks.push_back(poseBlockPtr);
+
+        // keep the camera extrinsics constants
+        if (cameraPose.isLocked() || isConstant || (!refineTranslation && !refineRotation))
+        {
+            // set the whole parameter block as constant.
+            _statistics.addState(EParameter::POSE, EEstimatorParameterState::CONSTANT);
+            problem.SetParameterBlockConstant(poseBlockPtr);
+            return;
+        }
+
+        // constant parameters
+        std::vector<int> constantExtrinsic;
+
+        // don't refine rotations
+        if (!refineRotation)
+        {
+            constantExtrinsic.push_back(0);
+            constantExtrinsic.push_back(1);
+            constantExtrinsic.push_back(2);
+        }
+
+        // don't refine translations
+        if (!refineTranslation)
+        {
+            constantExtrinsic.push_back(3);
+            constantExtrinsic.push_back(4);
+            constantExtrinsic.push_back(5);
+        }
+
+        // subset parametrization
+        if (!constantExtrinsic.empty())
+        {
+            auto* subsetManifold = new ceres::SubsetManifold(6, constantExtrinsic);
+            problem.SetManifold(poseBlockPtr, subsetManifold);
+        }
+
+        _statistics.addState(EParameter::POSE, EEstimatorParameterState::REFINED);
+    };
 
     // setup poses data
     for (const auto& posePair : sfmData.getPoses())
@@ -279,7 +296,7 @@ void BundleAdjustmentSymbolicCeres::addExtrinsicsToProblem(const sfmData::SfMDat
 
         const bool isConstant = (pose.getState() == EEstimatorParameterState::CONSTANT);
 
-        addPose(pose, isConstant, _posesBlocks[poseId], problem, refineTranslation, refineRotation);
+        addPose(pose, isConstant, _posesBlocks[poseId]);
     }
 
     // setup sub-poses data
@@ -298,12 +315,9 @@ void BundleAdjustmentSymbolicCeres::addExtrinsicsToProblem(const sfmData::SfMDat
 
             const bool isConstant = (rigSubPose.status == sfmData::ERigSubPoseStatus::CONSTANT);
 
-            addPose(sfmData::CameraPose(rigSubPose.pose), isConstant, _rigBlocks[rigId][subPoseId], problem, refineTranslation, refineRotation);
+            addPose(sfmData::CameraPose(rigSubPose.pose), isConstant, _rigBlocks[rigId][subPoseId]);
         }
     }
-
-    // Add default rig pose
-    addPose(sfmData::CameraPose(), true, _rigNull, problem, refineTranslation, refineRotation);
 }
 
 void BundleAdjustmentSymbolicCeres::addIntrinsicsToProblem(const sfmData::SfMData& sfmData,
@@ -479,7 +493,6 @@ void BundleAdjustmentSymbolicCeres::addIntrinsicsToProblem(const sfmData::SfMDat
 void BundleAdjustmentSymbolicCeres::addLandmarksToProblem(const sfmData::SfMData& sfmData, ERefineOptions refineOptions, ceres::Problem& problem)
 {
     const bool refineStructure = refineOptions & REFINE_STRUCTURE;
-    const bool refineStructureAsNormal = refineOptions & REFINE_STRUCTURE_AS_NORMALS;
 
     // set a LossFunction to be less penalized by false measurements.
     // note: set it to NULL if you don't want use a lossFunction.
@@ -505,10 +518,7 @@ void BundleAdjustmentSymbolicCeres::addLandmarksToProblem(const sfmData::SfMData
 
         double* landmarkBlockPtr = landmarkBlock.data();
         problem.AddParameterBlock(landmarkBlockPtr, 3);
-        if (refineStructureAsNormal)
-        {
-            problem.SetManifold(landmarkBlockPtr, new SO3Vec);
-        }
+      
 
         // add landmark parameter to the all parameters blocks pointers list
         _allParametersBlocks.push_back(landmarkBlockPtr);
@@ -523,27 +533,13 @@ void BundleAdjustmentSymbolicCeres::addLandmarksToProblem(const sfmData::SfMData
             const std::shared_ptr<IntrinsicBase> intrinsic = _intrinsicObjects[view.getIntrinsicId()];
             const auto& pose = sfmData.getPose(view);
 
-            // each residual block takes a point and a camera as input and outputs a 2
-            // dimensional residual. Internally, the cost function stores the observed
-            // image location and compares the reprojection against the observation.
-
+           
             assert(pose.getState() != EEstimatorParameterState::IGNORED);
             assert(intrinsic->getState() != EEstimatorParameterState::IGNORED);
 
             // needed parameters to create a residual block (K, pose)
             double* poseBlockPtr = _posesBlocks.at(view.getPoseId()).data();
             double* intrinsicBlockPtr = _intrinsicsBlocks.at(view.getIntrinsicId()).data();
-
-            bool withRig = (view.isPartOfRig() && !view.isPoseIndependant());
-            double* rigBlockPtr = nullptr;
-            if (withRig)
-            {
-                rigBlockPtr = _rigBlocks.at(view.getRigId()).at(view.getSubPoseId()).data();
-            }
-            else
-            {
-                rigBlockPtr = _rigNull.data();
-            }
 
             // apply a specific parameter ordering:
             if (_ceresOptions.useParametersOrdering)
@@ -553,15 +549,24 @@ void BundleAdjustmentSymbolicCeres::addLandmarksToProblem(const sfmData::SfMData
                 _linearSolverOrdering.AddElementToGroup(intrinsicBlockPtr, 2);
             }
 
-            if (withRig)
+            if (view.isPartOfRig() && !view.isPoseIndependant())
             {
-                ceres::CostFunction* costFunction = new CostProjection(observation, intrinsic, withRig);
-                problem.AddResidualBlock(costFunction, lossFunction, poseBlockPtr, rigBlockPtr, intrinsicBlockPtr, landmarkBlockPtr);
+                ceres::CostFunction* costFunction = new CostProjectionSimple(observation, intrinsic);
+
+                double* rigBlockPtr = _rigBlocks.at(view.getRigId()).at(view.getSubPoseId()).data();
+                _linearSolverOrdering.AddElementToGroup(rigBlockPtr, 1);
+
+                problem.AddResidualBlock(costFunction,
+                                         lossFunction,
+                                         poseBlockPtr,
+                                         rigBlockPtr,        // subpose of the cameras rig
+                                         intrinsicBlockPtr,
+                                         landmarkBlockPtr);  // do we need to copy 3D point to avoid false motion, if failure ?
             }
             else
             {
                 ceres::CostFunction* costFunction = new CostProjectionSimple(observation, intrinsic);
-                problem.AddResidualBlock(costFunction, lossFunction, poseBlockPtr, intrinsicBlockPtr, landmarkBlockPtr);
+                problem.AddResidualBlock(costFunction, lossFunction, poseBlockPtr, intrinsicBlockPtr, landmarkBlockPtr);    
             }
 
             if (!refineStructure || landmark.state == EEstimatorParameterState::CONSTANT)
@@ -712,14 +717,16 @@ void BundleAdjustmentSymbolicCeres::updateFromSolution(sfmData::SfMData& sfmData
 
             // do not update a camera pose set as Ignored or Constant in the Local strategy
             if (posePair.second.getState() != EEstimatorParameterState::REFINED)
-            {
                 continue;
-            }
 
-            const SE3::Matrix& poseBlock = _posesBlocks.at(poseId);
+            const std::array<double, 6>& poseBlock = _posesBlocks.at(poseId);
+
+            Mat3 R_refined;
+            ceres::AngleAxisToRotationMatrix(poseBlock.data(), R_refined.data());
+            const Vec3 t_refined(poseBlock.at(3), poseBlock.at(4), poseBlock.at(5));
 
             // update the pose
-            posePair.second.setTransform(poseFromRT(poseBlock.block<3, 3>(0, 0), poseBlock.block<3, 1>(0, 3)));
+            posePair.second.setTransform(poseFromRT(R_refined, t_refined));
         }
 
         // rig sub-poses
@@ -730,10 +737,14 @@ void BundleAdjustmentSymbolicCeres::updateFromSolution(sfmData::SfMData& sfmData
             for (const auto& subPoseit : rigIt.second)
             {
                 sfmData::RigSubPose& subPose = rig.getSubPose(subPoseit.first);
-                const SE3::Matrix& subPoseBlock = subPoseit.second;
+                const std::array<double, 6>& subPoseBlock = subPoseit.second;
+
+                Mat3 R_refined;
+                ceres::AngleAxisToRotationMatrix(subPoseBlock.data(), R_refined.data());
+                const Vec3 t_refined(subPoseBlock.at(3), subPoseBlock.at(4), subPoseBlock.at(5));
 
                 // update the sub-pose
-                subPose.pose = poseFromRT(subPoseBlock.block<3, 3>(0, 0), subPoseBlock.block<3, 1>(0, 3));
+                subPose.pose = poseFromRT(R_refined, t_refined);
             }
         }
     }

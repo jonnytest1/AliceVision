@@ -21,8 +21,8 @@ class CostPanoramaPinHole : public ceres::CostFunction
     {
         set_num_residuals(2);
 
-        mutable_parameter_block_sizes()->push_back(16);
-        mutable_parameter_block_sizes()->push_back(16);
+        mutable_parameter_block_sizes()->push_back(6);
+        mutable_parameter_block_sizes()->push_back(6);
         mutable_parameter_block_sizes()->push_back(intrinsic->getParams().size());
     }
 
@@ -35,11 +35,11 @@ class CostPanoramaPinHole : public ceres::CostFunction
         const double* parameter_pose_j = parameters[1];
         const double* parameter_intrinsics = parameters[2];
 
-        const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> iTo(parameter_pose_i);
-        const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> jTo(parameter_pose_j);
+        const Eigen::Map<const Eigen::Vector3d> iro(parameter_pose_i);
+        const Eigen::Map<const Eigen::Vector3d> jro(parameter_pose_j);
 
-        Eigen::Matrix<double, 3, 3> iRo = iTo.block<3, 3>(0, 0);
-        Eigen::Matrix<double, 3, 3> jRo = jTo.block<3, 3>(0, 0);
+        Eigen::Matrix<double, 3, 3> iRo = SO3::expm(iro);
+        Eigen::Matrix<double, 3, 3> jRo = SO3::expm(jro);
 
         _intrinsic->setScale({parameter_intrinsics[0], parameter_intrinsics[1]});
         _intrinsic->setOffset({parameter_intrinsics[2], parameter_intrinsics[3]});
@@ -70,30 +70,26 @@ class CostPanoramaPinHole : public ceres::CostFunction
 
         if (jacobians[0] != nullptr)
         {
-            Eigen::Map<Eigen::Matrix<double, 2, 16, Eigen::RowMajor>> J(jacobians[0]);
+            Eigen::Map<Eigen::Matrix<double, 2, 6, Eigen::RowMajor>> J(jacobians[0]);
 
-            Eigen::Matrix<double, 2, 9> J9 = _intrinsic->getDerivativeProjectWrtRotation(T, pt_i_sphere) *
+            Eigen::Matrix<double, 2, 3> J3 = _intrinsic->getDerivativeProjectWrtRotation(T, pt_i_sphere) *
                                              getJacobian_AB_wrt_B<3, 3, 3>(jRo, iRo.transpose()) * getJacobian_At_wrt_A<3, 3>() *
-                                             getJacobian_AB_wrt_A<3, 3, 3>(Eigen::Matrix3d::Identity(), iRo);
+                                             SO3::dexpmdr(iro);
 
             J.fill(0);
-            J.block<2, 3>(0, 0) = J9.block<2, 3>(0, 0);
-            J.block<2, 3>(0, 4) = J9.block<2, 3>(0, 3);
-            J.block<2, 3>(0, 8) = J9.block<2, 3>(0, 6);
+            J.block<2, 3>(0, 0) = J3.block<2, 3>(0, 0);
         }
 
         if (jacobians[1] != nullptr)
         {
-            Eigen::Map<Eigen::Matrix<double, 2, 16, Eigen::RowMajor>> J(jacobians[1]);
+            Eigen::Map<Eigen::Matrix<double, 2, 6, Eigen::RowMajor>> J(jacobians[1]);
 
-            Eigen::Matrix<double, 2, 9> J9 = _intrinsic->getDerivativeProjectWrtRotation(T, pt_i_sphere) *
+            Eigen::Matrix<double, 2, 3> J3 = _intrinsic->getDerivativeProjectWrtRotation(T, pt_i_sphere) *
                                              getJacobian_AB_wrt_A<3, 3, 3>(jRo, iRo.transpose()) *
-                                             getJacobian_AB_wrt_A<3, 3, 3>(Eigen::Matrix3d::Identity(), jRo);
+                                             SO3::dexpmdr(jro);
 
             J.fill(0);
-            J.block<2, 3>(0, 0) = J9.block<2, 3>(0, 0);
-            J.block<2, 3>(0, 4) = J9.block<2, 3>(0, 3);
-            J.block<2, 3>(0, 8) = J9.block<2, 3>(0, 6);
+            J.block<2, 3>(0, 0) = J3.block<2, 3>(0, 0);
         }
 
         if (jacobians[2] != nullptr)

@@ -391,7 +391,6 @@ bool ReconstructionEngine_panorama::adjust()
     BundleAdjustmentSymbolicCeres::CeresOptions options;
     options.summary = true;
     options.maxNumIterations = 300;
-    options.useFocalPrior = false;
     options.useParametersOrdering = false;
 
     // Start bundle with rotation only

@@ -20,7 +20,7 @@ class CostProjectionSimple : public ceres::CostFunction
     {
         set_num_residuals(2);
 
-        mutable_parameter_block_sizes()->push_back(16);
+        mutable_parameter_block_sizes()->push_back(6);
         mutable_parameter_block_sizes()->push_back(intrinsics->getParams().size());
         mutable_parameter_block_sizes()->push_back(3);
     }
@@ -31,8 +31,14 @@ class CostProjectionSimple : public ceres::CostFunction
         const double* parameter_intrinsics = parameters[1];
         const double* parameter_landmark = parameters[2];
 
-        const Eigen::Map<const SE3::Matrix> T(parameter_pose);
+        const Eigen::Map<const Eigen::Vector3d> vecR(parameter_pose);
+        const Eigen::Map<const Eigen::Vector3d> vecT(parameter_pose + 3);
         const Eigen::Map<const Vec3> pt(parameter_landmark);
+
+
+        Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+        T.block<3, 3>(0, 0) = SO3::expm(vecR);
+        T.block<3, 1>(0, 3) = vecT;
 
         const Vec4 pth = pt.homogeneous();
 
@@ -56,9 +62,20 @@ class CostProjectionSimple : public ceres::CostFunction
 
         if (jacobians[0] != nullptr)
         {
-            Eigen::Map<Eigen::Matrix<double, 2, 16, Eigen::RowMajor>> J(jacobians[0]);
+            Eigen::Map<Eigen::Matrix<double, 2, 6, Eigen::RowMajor>> J(jacobians[0]);
 
-            J = d_res_d_pt_est * _intrinsics->getDerivativeProjectWrtPoseLeft(T, pth);
+            Eigen::Matrix<double, 2, 16> Jpose;
+            Jpose = d_res_d_pt_est * _intrinsics->getDerivativeProjectWrtPose(T, pth);
+
+            Eigen::Matrix<double, 9, 3> Jbuf = SO3::dexpmdr(vecR);
+
+            Eigen::Matrix<double, 16, 6> Jalg =  Eigen::Matrix<double, 16, 6>::Zero();
+            Jalg.block<3, 3>(0, 0) = Jbuf.block<3, 3>(0, 0);
+            Jalg.block<3, 3>(4, 0) = Jbuf.block<3, 3>(3, 0);
+            Jalg.block<3, 3>(8, 0) = Jbuf.block<3, 3>(6, 0);
+            Jalg.block<3, 3>(12, 3).setIdentity();
+
+            J = Jpose * Jalg;
         }
 
         if (jacobians[1] != nullptr)

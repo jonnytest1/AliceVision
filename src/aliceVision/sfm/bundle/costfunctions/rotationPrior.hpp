@@ -11,7 +11,7 @@
 namespace aliceVision {
 namespace sfm {
 
-class CostRotationPrior : public ceres::SizedCostFunction<3, 16, 16>
+class CostRotationPrior : public ceres::SizedCostFunction<3, 6, 6>
 {
   public:
     explicit CostRotationPrior(const Eigen::Matrix3d& two_R_one)
@@ -23,11 +23,11 @@ class CostRotationPrior : public ceres::SizedCostFunction<3, 16, 16>
         const double* parameter_pose_one = parameters[0];
         const double* parameter_pose_two = parameters[1];
 
-        const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> oneTo(parameter_pose_one);
-        const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> twoTo(parameter_pose_two);
+        const Eigen::Map<const Eigen::Vector3d> onero(parameter_pose_one);
+        const Eigen::Map<const Eigen::Vector3d> tworo(parameter_pose_two);
 
-        Eigen::Matrix<double, 3, 3> oneRo = oneTo.block<3, 3>(0, 0);
-        Eigen::Matrix<double, 3, 3> twoRo = twoTo.block<3, 3>(0, 0);
+        Eigen::Matrix<double, 3, 3> oneRo = SO3::expm(onero);
+        Eigen::Matrix<double, 3, 3> twoRo = SO3::expm(tworo);
 
         Eigen::Matrix3d two_R_one_est = twoRo * oneRo.transpose();
         Eigen::Matrix3d error_R = two_R_one_est * _two_R_one.transpose();
@@ -44,30 +44,26 @@ class CostRotationPrior : public ceres::SizedCostFunction<3, 16, 16>
 
         if (jacobians[0])
         {
-            Eigen::Map<Eigen::Matrix<double, 3, 16, Eigen::RowMajor>> J(jacobians[0]);
+            Eigen::Map<Eigen::Matrix<double, 3, 6, Eigen::RowMajor>> J(jacobians[0]);
 
-            Eigen::Matrix<double, 3, 9> J9 = SO3::dlogmdr(error_R) * getJacobian_AB_wrt_A<3, 3, 3>(two_R_one_est, _two_R_one.transpose()) *
+            Eigen::Matrix<double, 3, 3> J3 = SO3::dlogmdr(error_R) * getJacobian_AB_wrt_A<3, 3, 3>(two_R_one_est, _two_R_one.transpose()) *
                                              getJacobian_AB_wrt_B<3, 3, 3>(twoRo, oneRo.transpose()) * getJacobian_At_wrt_A<3, 3>() *
-                                             getJacobian_AB_wrt_A<3, 3, 3>(Eigen::Matrix3d::Identity(), oneRo);
+                                             SO3::dexpmdr(onero);
 
             J.fill(0);
-            J.block<3, 3>(0, 0) = J9.block<3, 3>(0, 0);
-            J.block<3, 3>(0, 4) = J9.block<3, 3>(0, 3);
-            J.block<3, 3>(0, 8) = J9.block<3, 3>(0, 6);
+            J.block<3, 3>(0, 0) = J3.block<3, 3>(0, 0);
         }
 
         if (jacobians[1])
         {
-            Eigen::Map<Eigen::Matrix<double, 3, 16, Eigen::RowMajor>> J(jacobians[1]);
+            Eigen::Map<Eigen::Matrix<double, 3, 6, Eigen::RowMajor>> J(jacobians[1]);
 
-            Eigen::Matrix<double, 3, 9> J9 = SO3::dlogmdr(error_R) * getJacobian_AB_wrt_A<3, 3, 3>(two_R_one_est, _two_R_one.transpose()) *
+            Eigen::Matrix<double, 3, 3> J3 = SO3::dlogmdr(error_R) * getJacobian_AB_wrt_A<3, 3, 3>(two_R_one_est, _two_R_one.transpose()) *
                                              getJacobian_AB_wrt_A<3, 3, 3>(twoRo, oneRo.transpose()) *
-                                             getJacobian_AB_wrt_A<3, 3, 3>(Eigen::Matrix3d::Identity(), twoRo);
+                                             SO3::dexpmdr(tworo);
 
             J.fill(0);
-            J.block<3, 3>(0, 0) = J9.block<3, 3>(0, 0);
-            J.block<3, 3>(0, 4) = J9.block<3, 3>(0, 3);
-            J.block<3, 3>(0, 8) = J9.block<3, 3>(0, 6);
+            J.block<3, 3>(0, 0) = J3.block<3, 3>(0, 0);
         }
 
         return true;

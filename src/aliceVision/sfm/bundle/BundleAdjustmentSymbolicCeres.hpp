@@ -150,12 +150,6 @@ class BundleAdjustmentSymbolicCeres : public BundleAdjustment, ceres::Evaluation
     virtual void PrepareForEvaluation(bool evaluate_jacobians, bool new_evaluation_point);
 
   private:
-    void addPose(const sfmData::CameraPose& cameraPose,
-                 bool isConstant,
-                 SE3::Matrix& poseBlock,
-                 ceres::Problem& problem,
-                 bool refineTranslation,
-                 bool refineRotation);
 
     /**
      * @brief Clear structures for a new problem
@@ -252,7 +246,7 @@ class BundleAdjustmentSymbolicCeres : public BundleAdjustment, ceres::Evaluation
     std::vector<double*> _allParametersBlocks;
     /// poses blocks wrapper
     /// block: ceres angleAxis(3) + translation(3)
-    std::map<IndexT, SE3::Matrix> _posesBlocks;  // TODO : maybe we can use boost::flat_map instead of std::map ?
+    std::map<IndexT, std::array<double, 6>> _posesBlocks;  // TODO : maybe we can use boost::flat_map instead of std::map ?
     /// intrinsics blocks wrapper
     /// block: intrinsics params
     std::map<IndexT, std::vector<double>> _intrinsicsBlocks;
@@ -262,7 +256,7 @@ class BundleAdjustmentSymbolicCeres : public BundleAdjustment, ceres::Evaluation
     std::map<IndexT, std::array<double, 3>> _landmarksBlocks;
     /// rig sub-poses blocks wrapper
     /// block: ceres angleAxis(3) + translation(3)
-    std::map<IndexT, std::map<IndexT, SE3::Matrix>> _rigBlocks;
+    std::map<IndexT, std::map<IndexT, std::array<double, 6>>> _rigBlocks;
     /// Rig pose to use when there is no rig
     SE3::Matrix _rigNull = SE3::Matrix::Identity();
 
