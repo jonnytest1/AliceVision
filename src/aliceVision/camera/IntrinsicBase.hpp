@@ -123,7 +123,14 @@ class IntrinsicBase
      * @param[in] depth The depth
      * @return The 3D point
      */
-    Vec3 backproject(const Vec2& pt2D, bool applyUndistortion = true, const geometry::Pose3& pose = geometry::Pose3(), double depth = 1.0) const;
+    Vec3 backprojectTransform(const Vec2& pt2D, bool applyUndistortion = true, const geometry::Pose3& pose = geometry::Pose3(), double depth = 1.0) const;
+
+    /**
+     * @brief Back-projection of a 2D point on a unitsphere
+     * @param[in] pt2D The 2D point
+     * @return The 3D point
+     */
+    Vec3 backProjectUnit(const Vec2& pt2D) const;
 
     Vec4 getCartesianfromSphericalCoordinates(const Vec3& pt);
 
@@ -136,6 +143,8 @@ class IntrinsicBase
      * @return The projection jacobian with respect to the pose
      */
     virtual Eigen::Matrix<double, 2, 16> getDerivativeTransformProjectWrtPose(const Eigen::Matrix4d& pose, const Vec4& pt3D) const = 0;
+
+    virtual Eigen::Matrix<double, 2, 9> getDerivativeTransformProjectWrtRotation(const Eigen::Matrix4d& pose, const Vec4& pt) const = 0;
 
     /**
      * @brief Get the derivative of a projection of a 3D point into the camera plane
@@ -169,7 +178,12 @@ class IntrinsicBase
      */
     virtual Eigen::Matrix<double, 2, Eigen::Dynamic> getDerivativeTransformProjectWrtParams(const Eigen::Matrix4d& pos, const Vec4& pt3D) const = 0;
 
-    
+    /**
+     * @brief Get the derivative of the unit sphere backprojection
+     * @param[in] pt2D The 2D point
+     * @return The backproject jacobian with respect to the pose
+     */
+    virtual Eigen::Matrix<double, 3, Eigen::Dynamic> getDerivativeBackProjectUnitWrtParams(const Vec2& pt2D) const = 0;
 
     /**
      * @brief Compute the residual between the 3D projected point X and an image observation x

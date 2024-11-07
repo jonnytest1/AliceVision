@@ -183,7 +183,7 @@ void createVerticesWithVisibilities(const StaticVector<int>& cams,
                 if (depth <= 0.0f)
                     continue;
 
-                const Point3d p = mp.backproject(c, Point2d(x, y), depth);
+                const Point3d p = mp.backprojectTransform(c, Point2d(x, y), depth);
                 const double pixSize = mp.getCamPixelSize(p, c);
 
                 nanoflann::KNNResultSet<double, std::size_t> resultSet(1);

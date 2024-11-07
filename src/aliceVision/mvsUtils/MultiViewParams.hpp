@@ -122,7 +122,7 @@ class MultiViewParams
 
     ~MultiViewParams();
 
-    inline Point3d backproject(const int camIndex, const Point2d& pix, double depth) const
+    inline Point3d backprojectTransform(const int camIndex, const Point2d& pix, double depth) const
     {
         const Point3d p = CArr[camIndex] + (iCamArr[camIndex] * pix).normalize() * depth;
         return p;

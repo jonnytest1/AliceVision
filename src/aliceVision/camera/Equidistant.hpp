@@ -74,7 +74,7 @@ class Equidistant : public IntrinsicScaleOffsetDisto
 
     Vec2 project(const Vec4& pt, bool applyDistortion = true) const override;
 
-    Eigen::Matrix<double, 2, 9> getDerivativeTransformProjectWrtRotation(const Eigen::Matrix4d& pose, const Vec4& pt) const;
+    Eigen::Matrix<double, 2, 9> getDerivativeTransformProjectWrtRotation(const Eigen::Matrix4d& pose, const Vec4& pt) const override;
 
     Eigen::Matrix<double, 2, 16> getDerivativeTransformProjectWrtPose(const Eigen::Matrix4d& pose, const Vec4& pt) const override;
 
@@ -111,6 +111,13 @@ class Equidistant : public IntrinsicScaleOffsetDisto
     Eigen::Matrix2d getDerivativeIma2CamWrtPoint() const override;
 
     Eigen::Matrix2d getDerivativeIma2CamWrtPrincipalPoint() const override;
+
+    /**
+     * @brief Get the derivative of the unit sphere backprojection
+     * @param[in] pt2D The 2D point
+     * @return The backproject jacobian with respect to the pose
+     */
+    Eigen::Matrix<double, 3, Eigen::Dynamic> getDerivativeBackProjectUnitWrtParams(const Vec2& pt2D) const override;
 
     /**
      * @brief Return true if this ray should be visible in the image
