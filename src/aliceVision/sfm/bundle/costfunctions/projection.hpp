@@ -11,6 +11,7 @@
 #include <aliceVision/sfmData/SfMData.hpp>
 #include <aliceVision/sfm/bundle/costfunctions/intrinsicsProject.hpp>
 #include <ceres/rotation.h>
+#include "dynamic_cost_function_to_functor.h"
 
 #include <memory>
 
@@ -55,7 +56,7 @@ struct ProjectionSimpleErrorFunctor
         return _intrinsicFunctor(innerParameters, residuals);
     }
 
-    ceres::DynamicCostFunctionToFunctor _intrinsicFunctor;
+    ceres::DynamicCostFunctionToFunctorTmp _intrinsicFunctor;
 };
 
 struct ProjectionErrorFunctor
@@ -108,7 +109,7 @@ struct ProjectionErrorFunctor
         return _intrinsicFunctor(innerParameters, residuals);
     }
 
-    ceres::DynamicCostFunctionToFunctor _intrinsicFunctor;
+    ceres::DynamicCostFunctionToFunctorTmp _intrinsicFunctor;
 };
 
 

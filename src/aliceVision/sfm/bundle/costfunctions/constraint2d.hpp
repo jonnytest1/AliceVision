@@ -11,6 +11,7 @@
 #include <aliceVision/sfm/bundle/costfunctions/intrinsicsProject.hpp>
 #include <aliceVision/sfm/bundle/costfunctions/intrinsicsLift.hpp>
 #include <ceres/rotation.h>
+#include "dynamic_cost_function_to_functor.h"
 
 namespace aliceVision {
 namespace sfm {
@@ -50,8 +51,8 @@ struct Constraint2dErrorFunctor
         return _intrinsicProjectFunctor(projectParameters, residuals);
     }
 
-    ceres::DynamicCostFunctionToFunctor _intrinsicLiftFunctor;
-    ceres::DynamicCostFunctionToFunctor _intrinsicProjectFunctor;
+    ceres::DynamicCostFunctionToFunctorTmp _intrinsicLiftFunctor;
+    ceres::DynamicCostFunctionToFunctorTmp _intrinsicProjectFunctor;
 };
 
 }  // namespace sfm
